@@ -4,12 +4,11 @@ Leitor de quadrinhos **Android-only**, feito com Expo + React Native + TypeScrip
 
 ## O que está implementado
 
-- Importação de múltiplos arquivos `.cbz` e `.cbr` pelo seletor de documentos Android.
-- CBZ lido com JSZip; CBR lido no módulo nativo Android com Junrar.
+- Importação de múltiplos arquivos `.cbr` pelo seletor de documentos Android.
+- CBR lido no módulo nativo Android com Junrar.
 - Ordenação natural das páginas (`2.jpg` antes de `10.jpg`).
 - Leitor em tela cheia com navegação anterior/próxima.
-- Extração de `ComicInfo.xml` nos arquivos CBZ quando presente.
-- Biblioteca e progresso persistidos localmente com AsyncStorage.
+- - Biblioteca e progresso persistidos localmente com AsyncStorage.
 - Extração somente da página atual para o cache, sem descompactar o quadrinho inteiro no armazenamento.
 - Sem versão iOS.
 
@@ -55,7 +54,7 @@ npm install
 npx expo run:android
 ```
 
-O primeiro build pode demorar alguns minutos. Depois de instalado no aparelho/emulador, o Metro será iniciado. Use **Importar arquivos**, escolha um `.cbz` ou `.cbr` e toque no título para abrir.
+O primeiro build pode demorar alguns minutos. Depois de instalado no aparelho/emulador, o Metro será iniciado. Use **Importar arquivos**, escolha um `.cbr` e toque no título para abrir.
 
 Para iniciar somente o Metro depois que o app já estiver instalado:
 
