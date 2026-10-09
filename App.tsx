@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import JSZip from 'jszip';
+import AppleitorCbrModule from './modules/appleitor-cbr';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Image, Modal, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
@@ -9,10 +10,11 @@ import { ActivityIndicator, Alert, FlatList, Image, Modal, Pressable, SafeAreaVi
 const STORAGE_KEY = 'appleitor-library-v1';
 const imageExtensions = /\.(jpe?g|png|webp|gif)$/i;
 type Comic = { id: string; name: string; uri: string; type: 'CBZ' | 'CBR'; pages: string[]; progress: number; title?: string; series?: string; number?: string };
+type InspectResult = { pages: string[]; title?: string; series?: string; number?: string };
 const naturalSort = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
 const readableName = (name: string) => name.replace(/\.(cbz|cbr)$/i, '').replace(/[._-]+/g, ' ').trim();
 
-async function inspectCbz(uri: string) {
+async function inspectCbz(uri: string): Promise<InspectResult> {
   const encoded = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
   const zip = await JSZip.loadAsync(encoded, { base64: true });
   const pages = Object.keys(zip.files).filter((entry) => !zip.files[entry].dir && imageExtensions.test(entry)).sort(naturalSort);
@@ -21,8 +23,11 @@ async function inspectCbz(uri: string) {
   const xml = await zip.files[comicInfo].async('text');
   return { pages, title: xml.match(/<Title>(.*?)<\/Title>/i)?.[1], series: xml.match(/<Series>(.*?)<\/Series>/i)?.[1], number: xml.match(/<Number>(.*?)<\/Number>/i)?.[1] };
 }
-
+async function inspectCbr(uri: string): Promise<InspectResult> {
+  return { pages: await AppleitorCbrModule.listPagesAsync(uri) };
+}
 async function extractPage(comic: Comic, pageName: string) {
+  if (comic.type === 'CBR') return AppleitorCbrModule.extractPageAsync(comic.uri, pageName);
   const encoded = await FileSystem.readAsStringAsync(comic.uri, { encoding: FileSystem.EncodingType.Base64 });
   const zip = await JSZip.loadAsync(encoded, { base64: true });
   const file = zip.files[pageName];
@@ -52,8 +57,8 @@ export default function App() {
       const imported: Comic[] = [];
       for (const asset of result.assets) {
         const type = /\.cbr$/i.test(asset.name) ? 'CBR' : 'CBZ';
-        if (type === 'CBR') { imported.push({ id: `${Date.now()}-${asset.name}`, name: readableName(asset.name), uri: asset.uri, type, pages: [], progress: 0 }); continue; }
-        const inspected = await inspectCbz(asset.uri);
+        const inspected = type === 'CBR' ? await inspectCbr(asset.uri) : await inspectCbz(asset.uri);
+        if (!inspected.pages.length) continue;
         if (inspected.pages.length) imported.push({ id: `${Date.now()}-${asset.name}`, name: readableName(asset.name), uri: asset.uri, type, pages: inspected.pages, progress: 0, title: inspected.title, series: inspected.series, number: inspected.number });
       }
       saveLibrary([...imported, ...library.filter((old) => !imported.some((item) => item.name === old.name))]);
@@ -61,7 +66,6 @@ export default function App() {
   };
 
   const openComic = async (comic: Comic) => {
-    if (comic.type === 'CBR') { Alert.alert('CBR em breve', 'O suporte CBR será adicionado com um módulo nativo Android baseado em libarchive.'); return; }
     setActiveComic(comic); setLoading(true);
     try { setActivePageUri(await extractPage(comic, comic.pages[comic.progress])); } catch { Alert.alert('Erro ao abrir', 'Não foi possível extrair esta página.'); setActiveComic(null); } finally { setLoading(false); }
   };
@@ -80,11 +84,11 @@ export default function App() {
       <View style={styles.hero}><View style={styles.heroCopy}><Text style={styles.heroKicker}>LEIA SEM DISTRAÇÕES</Text><Text style={styles.heroTitle}>Sua estante,{`\n`}do seu jeito.</Text><Text style={styles.heroBody}>Importe quadrinhos do armazenamento e continue de onde parou.</Text></View><View style={styles.heroMark}><Text style={styles.heroMarkText}>A</Text></View></View>
       <Pressable style={styles.importButton} onPress={importFiles} disabled={loading}>{loading ? <ActivityIndicator color="#101313" /> : <><Text style={styles.importIcon}>＋</Text><Text style={styles.importLabel}>Importar arquivos</Text></>}</Pressable>
       <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>Sua biblioteca</Text><Text style={styles.counter}>{stats.total} {stats.total === 1 ? 'título' : 'títulos'}</Text></View>
-      {library.length === 0 ? <View style={styles.empty}><Text style={styles.emptySymbol}>▧</Text><Text style={styles.emptyTitle}>Nada por aqui ainda</Text><Text style={styles.emptyBody}>Toque em “Importar arquivos” para adicionar seus CBZ e CBR.</Text></View> : <FlatList data={library} scrollEnabled={false} keyExtractor={(item) => item.id} renderItem={({ item }) => <Pressable style={styles.card} onPress={() => openComic(item)}><View style={[styles.cover, item.type === 'CBR' && styles.coverCbr]}><Text style={styles.coverType}>{item.type}</Text><Text style={styles.coverLetter}>{(item.series || item.title || item.name).charAt(0).toUpperCase()}</Text></View><View style={styles.cardDetails}><Text style={styles.cardTitle} numberOfLines={2}>{item.title || item.name}</Text><Text style={styles.cardMeta}>{item.series || (item.type === 'CBZ' ? 'CBZ · pronto para ler' : 'CBR · suporte em breve')}</Text><View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${item.pages.length ? ((item.progress + 1) / item.pages.length) * 100 : 0}%` }]} /></View><Text style={styles.progressText}>{item.pages.length ? `Página ${item.progress + 1} de ${item.pages.length}` : 'Aguardando suporte nativo'}</Text></View><Text style={styles.chevron}>›</Text></Pressable>} />}
+      {library.length === 0 ? <View style={styles.empty}><Text style={styles.emptySymbol}>▧</Text><Text style={styles.emptyTitle}>Nada por aqui ainda</Text><Text style={styles.emptyBody}>Toque em “Importar arquivos” para adicionar seus CBZ e CBR.</Text></View> : <FlatList data={library} scrollEnabled={false} keyExtractor={(item) => item.id} renderItem={({ item }) => <Pressable style={styles.card} onPress={() => openComic(item)}><View style={[styles.cover, item.type === 'CBR' && styles.coverCbr]}><Text style={styles.coverType}>{item.type}</Text><Text style={styles.coverLetter}>{(item.series || item.title || item.name).charAt(0).toUpperCase()}</Text></View><View style={styles.cardDetails}><Text style={styles.cardTitle} numberOfLines={2}>{item.title || item.name}</Text><Text style={styles.cardMeta}>{item.series || (item.type === 'CBZ' ? 'CBZ · pronto para ler' : 'CBR · pronto para ler')}</Text><View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${item.pages.length ? ((item.progress + 1) / item.pages.length) * 100 : 0}%` }]} /></View><Text style={styles.progressText}>{item.pages.length ? `Página ${item.progress + 1} de ${item.pages.length}` : 'Sem páginas de imagem'}</Text></View><Text style={styles.chevron}>›</Text></Pressable>} />}
       <View style={styles.footerNote}><Text style={styles.footerDot}>●</Text><Text style={styles.footerText}>Arquivos ficam no seu dispositivo</Text></View>
     </ScrollView>
     <Modal visible={!!activeComic} animationType="fade" onRequestClose={() => setActiveComic(null)}><SafeAreaView style={styles.reader}><View style={styles.readerTop}><Pressable onPress={() => setActiveComic(null)}><Text style={styles.close}>‹</Text></Pressable><Text style={styles.readerTitle} numberOfLines={1}>{activeComic?.title || activeComic?.name}</Text><Text style={styles.readerCount}>{activeComic ? `${activeComic.progress + 1}/${activeComic.pages.length}` : ''}</Text></View><View style={styles.pageArea}>{activePageUri && <Image source={{ uri: activePageUri }} style={{ width: width - 24, height: height - 180 }} resizeMode="contain" />}{loading && <ActivityIndicator size="large" color="#c6f36b" />}</View><View style={styles.readerControls}><Pressable style={styles.pageButton} onPress={() => goToPage(-1)}><Text style={styles.pageButtonText}>‹ anterior</Text></Pressable><Text style={styles.readerHint}>use os controles</Text><Pressable style={styles.pageButton} onPress={() => goToPage(1)}><Text style={styles.pageButtonText}>próxima ›</Text></Pressable></View></SafeAreaView></Modal>
-    <Modal visible={showInfo} transparent animationType="fade" onRequestClose={() => setShowInfo(false)}><Pressable style={styles.overlay} onPress={() => setShowInfo(false)}><View style={styles.infoCard}><Text style={styles.infoTitle}>Sobre o Appleitor</Text><Text style={styles.infoBody}>Leitor Android focado em privacidade. Esta versão suporta CBZ (ZIP renomeado), ordena as páginas naturalmente e salva seu progresso localmente.</Text><Text style={styles.infoBody}>CBR (RAR) aparece na biblioteca, mas requer o próximo módulo nativo Android.</Text><Pressable style={styles.doneButton} onPress={() => setShowInfo(false)}><Text style={styles.doneText}>Entendi</Text></Pressable></View></Pressable></Modal>
+    <Modal visible={showInfo} transparent animationType="fade" onRequestClose={() => setShowInfo(false)}><Pressable style={styles.overlay} onPress={() => setShowInfo(false)}><View style={styles.infoCard}><Text style={styles.infoTitle}>Sobre o Appleitor</Text><Text style={styles.infoBody}>Leitor Android focado em privacidade. CBZ e CBR são lidos localmente, com ordenação natural e progresso salvo no dispositivo.</Text><Text style={styles.infoBody}>O CBR usa Junrar no módulo nativo Android e extrai somente a página solicitada para o cache.</Text><Pressable style={styles.doneButton} onPress={() => setShowInfo(false)}><Text style={styles.doneText}>Entendi</Text></Pressable></View></Pressable></Modal>
   </SafeAreaView>;
 }
 
