@@ -5,11 +5,11 @@ Leitor de quadrinhos **Android-only**, feito com Expo + React Native + TypeScrip
 ## O que está implementado
 
 - Importação de múltiplos arquivos `.cbr` pelo seletor de documentos Android.
-- CBR lido no módulo nativo Android com Junrar.
+- CBR RAR4/RAR5 lido no módulo nativo Android com unrar5j.
 - Ordenação natural das páginas (`2.jpg` antes de `10.jpg`).
 - Leitor em tela cheia com navegação anterior/próxima.
 - - Biblioteca e progresso persistidos localmente com AsyncStorage.
-- Extração somente da página atual para o cache, sem descompactar o quadrinho inteiro no armazenamento.
+- Extração das páginas para o cache temporário durante a leitura, sem gravar o quadrinho na galeria.
 - Sem versão iOS.
 
 ## Testar localmente

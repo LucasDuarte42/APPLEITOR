@@ -42,7 +42,7 @@ export default function App() {
         return;
       }
       saveLibrary([...imported, ...library.filter((old) => !imported.some((item) => item.name === old.name))]);
-    } catch { Alert.alert('Não foi possível importar', 'Verifique se o arquivo CBR é válido e tente novamente.'); } finally { setLoading(false); }
+    } catch (error) { const message = error instanceof Error ? error.message : 'Formato não reconhecido ou arquivo corrompido.'; Alert.alert('Não foi possível importar', message); } finally { setLoading(false); }
   };
 
   const openComic = async (comic: Comic) => {

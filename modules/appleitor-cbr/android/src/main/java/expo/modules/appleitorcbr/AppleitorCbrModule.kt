@@ -1,66 +1,76 @@
 package expo.modules.appleitorcbr
 
 import android.net.Uri
-import com.github.junrar.Archive
-import com.github.junrar.rarfile.FileHeader
+import be.stef.rar.Unrar5j
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import java.io.File
-import java.io.FileOutputStream
 
 class AppleitorCbrModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("AppleitorCbr")
 
     AsyncFunction("listPagesAsync") { uri: String ->
-      withArchive(uri) { archive ->
-        val pages = mutableListOf<String>()
-        var header: FileHeader? = archive.nextFileHeader()
-        while (header != null) {
-          val current = header
-          if (!current.isDirectory && isImage(current.fileNameString)) pages.add(current.fileNameString)
-          header = archive.nextFileHeader()
+      val archiveFile = copyToCache(uri, "inspect")
+      val outputDir = File.createTempFile("appleitor-pages-", "", requireNotNull(appContext.reactContext).cacheDir).apply {
+        delete()
+        mkdirs()
+      }
+      try {
+        val result = Unrar5j.extract(archiveFile.absolutePath, outputDir.absolutePath, null)
+        if (result.successCount == 0 && result.errorCount > 0) {
+          throw IllegalArgumentException("Não foi possível extrair as páginas do CBR")
         }
-        pages.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it })
+        listImageFiles(outputDir)
+      } finally {
+        archiveFile.delete()
+        outputDir.deleteRecursively()
       }
     }
 
     AsyncFunction("extractPageAsync") { uri: String, entryName: String ->
       val archiveFile = copyToCache(uri, "extract")
-      val archive = Archive(archiveFile)
+      val outputDir = File.createTempFile("appleitor-page-", "", requireNotNull(appContext.reactContext).cacheDir).apply {
+        delete()
+        mkdirs()
+      }
       try {
-        var header: FileHeader? = archive.nextFileHeader()
-        while (header != null) {
-          val current = header
-          if (!current.isDirectory && current.fileNameString == entryName) {
-            val extension = entryName.substringAfterLast('.', "jpg").lowercase()
-            val output = File(requireNotNull(appContext.reactContext).cacheDir, "appleitor-${entryName.hashCode()}.$extension")
-            FileOutputStream(output).use { stream -> archive.extractFile(current, stream) }
-            return@AsyncFunction Uri.fromFile(output).toString()
-          }
-          header = archive.nextFileHeader()
+        val result = Unrar5j.extract(archiveFile.absolutePath, outputDir.absolutePath, null, entryName)
+        if (result.successCount == 0) {
+          throw IllegalArgumentException("Não foi possível extrair a página do CBR")
         }
-        throw IllegalArgumentException("Página não encontrada no CBR: $entryName")
+        val extracted = findEntry(outputDir, entryName)
+          ?: throw IllegalArgumentException("Página não encontrada no CBR: $entryName")
+        Uri.fromFile(extracted).toString()
       } finally {
-        archive.close()
         archiveFile.delete()
+        outputDir.deleteRecursively()
       }
     }
-  }
-
-  private fun withArchive(uri: String, block: (Archive) -> List<String>): List<String> {
-    val archiveFile = copyToCache(uri, "inspect")
-    val archive = Archive(archiveFile)
-    return try { block(archive) } finally { archive.close(); archiveFile.delete() }
   }
 
   private fun copyToCache(uri: String, prefix: String): File {
     val context = requireNotNull(appContext.reactContext)
     val target = File.createTempFile("appleitor-$prefix-", ".rar", context.cacheDir)
-    val input = context.contentResolver.openInputStream(Uri.parse(uri)) ?: throw IllegalArgumentException("Não foi possível abrir o CBR")
+    val input = context.contentResolver.openInputStream(Uri.parse(uri))
+      ?: throw IllegalArgumentException("Não foi possível abrir o CBR")
     input.use { source -> target.outputStream().use { destination -> source.copyTo(destination) } }
     return target
   }
 
-  private fun isImage(name: String) = name.matches(Regex(".*\\.(jpe?g|png|webp|gif)$", RegexOption.IGNORE_CASE))
+  private fun listImageFiles(root: File): List<String> = root.walkTopDown()
+    .filter { it.isFile && isImage(it.name) }
+    .map { it.relativeTo(root).path.replace(File.separatorChar, '/') }
+    .toList()
+
+  private fun findEntry(root: File, entryName: String): File? {
+    val normalized = entryName.replace('\\', '/')
+    return root.walkTopDown().firstOrNull {
+      it.isFile && it.relativeTo(root).path.replace(File.separatorChar, '/') == normalized
+    } ?: root.walkTopDown().firstOrNull { it.isFile && it.name == File(normalized).name }
+  }
+
+  private fun isImage(name: String) = name.matches(
+    Regex(".*\\.(jpe?g|png|webp|gif)$", RegexOption.IGNORE_CASE)
+  )
 }
