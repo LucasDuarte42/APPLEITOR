@@ -50,16 +50,23 @@ export default function App() {
   const saveLibrary = (next: Comic[]) => { setLibrary(next); AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next)); };
 
   const importFiles = async () => {
-    const result = await DocumentPicker.getDocumentAsync({ type: ['application/zip', 'application/x-rar-compressed', 'application/octet-stream'], multiple: true, copyToCacheDirectory: true });
+    const result = await DocumentPicker.getDocumentAsync({ type: '*/*', multiple: true, copyToCacheDirectory: true });
     if (result.canceled) return;
     setLoading(true);
     try {
       const imported: Comic[] = [];
       for (const asset of result.assets) {
-        const type = /\.cbr$/i.test(asset.name) ? 'CBR' : 'CBZ';
+        const fileName = asset.name ?? '';
+        const lowerName = fileName.toLowerCase();
+        if (!lowerName.endsWith('.cbz') && !lowerName.endsWith('.cbr')) continue;
+        const type = lowerName.endsWith('.cbr') ? 'CBR' : 'CBZ';
         const inspected = type === 'CBR' ? await inspectCbr(asset.uri) : await inspectCbz(asset.uri);
         if (!inspected.pages.length) continue;
-        if (inspected.pages.length) imported.push({ id: `${Date.now()}-${asset.name}`, name: readableName(asset.name), uri: asset.uri, type, pages: inspected.pages, progress: 0, title: inspected.title, series: inspected.series, number: inspected.number });
+        imported.push({ id: `${Date.now()}-${fileName}`, name: readableName(fileName), uri: asset.uri, type, pages: inspected.pages, progress: 0, title: inspected.title, series: inspected.series, number: inspected.number });
+      }
+      if (!imported.length) {
+        Alert.alert('Arquivo inválido', 'Selecione um arquivo com extensão .CBZ ou .CBR.');
+        return;
       }
       saveLibrary([...imported, ...library.filter((old) => !imported.some((item) => item.name === old.name))]);
     } catch { Alert.alert('Não foi possível importar', 'Verifique se o arquivo é um CBZ válido e tente novamente.'); } finally { setLoading(false); }
